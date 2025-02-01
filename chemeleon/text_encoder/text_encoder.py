@@ -61,6 +61,9 @@ class TextEncoder(nn.Module):
         ), "Text encoder is not loaded properly!"
 
     def _setup_text_encoder(self, trainable_text_encoder: bool = False):
+        assert (
+            self.text_encoder_name in MODEL_NAMES
+        ), f"Invalid model name. Must be one of {MODEL_NAMES}"
         if self.text_encoder_name.startswith("chemeleon/"):
             # download model from wandb
             api = wandb.Api()

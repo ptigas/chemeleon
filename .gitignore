@@ -16,6 +16,7 @@ artifacts/
 results*/
 figures/
 data/mp-50/
+data/mp-20/
 
 # file formats
 *.egg-info
@@ -24,6 +25,7 @@ data/mp-50/
 *.out
 *.err
 *.swp
+*.sh
 *.json
 *qsub*
 *.log

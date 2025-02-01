@@ -31,7 +31,7 @@ class DataModule(LightningDataModule):
 
     @property
     def dataset_cls(self) -> Dataset:
-        if self.dataset_name.startswith("mp-"):
+        if self.dataset_name == "mp-40":
             return MPDataset
         else:
             raise NotImplementedError(f"{self.dataset_name} should be one of mp-40")

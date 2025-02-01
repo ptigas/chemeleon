@@ -1,3 +1,4 @@
+from typing import List
 from pathlib import Path
 import warnings
 import pandas as pd
@@ -20,16 +21,14 @@ class MPDataset(Dataset):
         data_dir: str,
         split: str,
         text_guide: bool = False,
-        text_targets: list[str] = None,
+        text_targets: List[str] = None,
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
         self.split = split
         self.text_guide = text_guide
         self.text_targets = text_targets
-        if isinstance(self.text_targets, str):
-            self.text_targets = [self.text_targets]
-
+    
         path_data = Path(self.data_dir, f"{self.split}.csv")
         self.data = pd.read_csv(path_data)
 
