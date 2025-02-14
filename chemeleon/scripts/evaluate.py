@@ -60,6 +60,8 @@ def test_evaluate(
     model = Chemeleon.load_from_checkpoint(model_path)  # pylint: disable=E1120
     model.eval()
     text_targets = model.hparams.text_targets
+    if isinstance(text_targets, str):
+        text_targets = [text_targets]
     print(f"Text targets: {text_targets}")
 
     # read test data
@@ -67,13 +69,30 @@ def test_evaluate(
     if not path_test_data.exists():
         raise FileNotFoundError(f"{path_test_data} does not exist.")
     df_test = pd.read_csv(path_test_data)
+    print(f"{len(df_test)} test data loaded from {path_test_data}.")
+
+    # create save path
+    path_save = Path(save_path)
+    path_save.mkdir(parents=True, exist_ok=True)
+
+    # skip if already evaluated materials
+    path_results = path_save / "results.csv"
+    if path_results.exists():
+        df_results = pd.read_csv(path_results)
+        evaluated_materials = df_results["material_id"].values
+        df_test = df_test[~df_test["material_id"].isin(evaluated_materials)]
+        print(
+            f"Found {len(evaluated_materials)} evaluated materials. {len(df_test)} will be evaluated."
+        )
+    else:
+        df_results = pd.DataFrame()
 
     # set mace calculator
     mace_calc = mace_mp(default_dtype=mace_dtype, device=mace_device)
 
     # start evaluation
-    collections = defaultdict(list)
     for i, row in tqdm(df_test.iterrows()):
+        collections = defaultdict(list)
         print(f"Evaluate {i} structure ({row['material_id']})...")
         # get test structure
         test_st = Structure.from_str(row["cif"], fmt="cif")
@@ -147,28 +166,30 @@ def test_evaluate(
             for n, st in enumerate(gen_st_list):
                 collections[f"gen_structure_{n}"].append(st.to(fmt="cif"))
 
+            # append results
+            df_row = pd.DataFrame(collections)
+            df_results = pd.concat([df_results, df_row], ignore_index=True)
+            if len(df_results) % 10 == 0:
+                df_results.to_csv(path_results, index=False)
+
         except Exception as e:  # pylint: disable=W0703
             print(f"Error: {e}")
 
     # mean results
-    mean_entry = {}
-    for k, v in collections.items():
+    log_dict = {}
+    for k in df_results.columns:
         if k.startswith("gen_structure") or k == "ref_structure" or k == "material_id":
             continue
-        mean_entry[f"mean_{k}"] = np.nanmean(v)
-    collections.update(mean_entry)
-
-    # save results
-    path_save = Path(save_path)
-    path_save.mkdir(parents=True, exist_ok=True)
-    df_results = pd.DataFrame(collections)
-    df_results.to_csv(path_save / "results.csv", index=False)
-    print(f"Results saved to {path_save / 'results.csv'}")
+        mean_value = np.nanmean(df_results[k])
+        df_results[f"mean_{k}"] = mean_value
+        log_dict[f"mean_{k}"] = mean_value
+    df_results.to_csv(path_results, index=False)
 
     # log
     if wandb_log:
         wandb.init(project=wandb_project, group=wandb_group, name=wandb_name)
-        wandb.log({k: v for k, v in collections.items() if k.startswith("mean")})
+        # log for only mean values
+        wandb.log(log_dict)
         wandb.save(str(path_save / "results.csv"))
         wandb.finish()
 
@@ -176,6 +197,9 @@ def test_evaluate(
 def test_valid(gen_st_list: list[Structure]):
     valid_gen_st_list = []
     for st in gen_st_list:
+        if len(st) == 1:
+            valid_gen_st_list.append(st)
+            continue
         # check if the lattice length < 60A
         if max(st.lattice.abc) > 60:
             continue
