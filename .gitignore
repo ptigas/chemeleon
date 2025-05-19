@@ -17,6 +17,8 @@ results*/
 figures/
 data/mp-50/
 data/mp-20/
+build/
+dist/
 
 # file formats
 *.egg-info

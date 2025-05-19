@@ -12,12 +12,9 @@
 </div>
 
 <p align="center">
- <a href="https://8501-01j80snre5xdhq828s1q5brs0m.cloudspaces.litng.ai/">
-     <img alt="App" src="https://img.shields.io/badge/app-v0.1.1-brightgreen.svg?style=plastic">
- </a>
-  <a href="https://pypi.org/project/chemeleon">
-     <img alt="PyPI" src="https://img.shields.io/badge/PyPI-v0.1.2-blue.svg?style=plastic&logo=PyPI">
- </a>
+<a href="https://pypi.org/project/chemeleon">
+    <img alt="PyPI" src="https://img.shields.io/badge/PyPI-v0.1.3-blue.svg?style=plastic&logo=PyPI">
+</a>
  <a href="https://chemrxiv.org/engage/chemrxiv/article-details/6728e27cf9980725cf118177">
      <img alt="DOI" src="https://img.shields.io/badge/DOI-doi-organge.svg?style=plastic">
  </a>
@@ -38,11 +35,7 @@ Chemeleon is a text-guided diffusion model designed for crystal structure genera
 
 ## Demo Application
 
-A demo version of Chemeleon is available at [Chemeleon App](https://8501-01j80snre5xdhq828s1q5brs0m.cloudspaces.litng.ai).
->[!NOTE]
-> The demo is currently in beta and hosted on Lightning Studio. The server will automatically shut down when not in use and may take approximately 2 minutes to restart.
-
-For local deployment, you can run the application on your machine with the following command:
+You can run the application on your machine with the following command after installing the package:
 
 ```bash
 streamlit run app/steamlit_app.py
@@ -289,15 +282,18 @@ This script will output the following metrics:
 # Citation
 
 If you find our work helpful, please refer to the following publication:
-["Exploration of crystal chemical space using text-guided generative artificial intelligence" Chemxiv (2024)](https://chemrxiv.org/engage/chemrxiv/article-details/6728e27cf9980725cf118177)
+["Exploration of crystal chemical space using text-guided generative artificial intelligence" Nature Communications (2025)](https://doi.org/10.1038/s41467-025-59636-y)
 
 ```
-@article{chemeleon,
+@article{park2025exploration,
   title={Exploration of crystal chemical space using text-guided generative artificial intelligence},
   author={Park, Hyunsoo and Onwuli, Anthony and Walsh, Aron},
-  journal={ChemRxiv},
-  doi={10.26434/chemrxiv-2024-rw8p5},
-  year={2024}
+  journal={Nature Communications},
+  volume={16},
+  number={1},
+  pages={1--14},
+  year={2025},
+  publisher={Nature Publishing Group}
 }
 ```
 
