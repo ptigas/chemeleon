@@ -496,3 +496,204 @@ class Chemeleon(BaseModule):
                 return trajectory
             else:
                 return trajectory[-1]
+
+    def decode_embeddings_to_structures(
+        self,
+        embeddings: torch.Tensor,
+        n_atoms: int,
+        n_samples: int,
+        cond_scale: float = 2.0,
+        step_lr: float = 1e-5,
+        return_trajectory: bool = False,
+        stream: bool = False,
+    ):
+        """
+        Decode CLIP embeddings into crystal structures using the diffusion model.
+        
+        Args:
+            embeddings: CLIP embeddings tensor [batch_size, text_dim] or [1, text_dim]
+            n_atoms: Number of atoms in generated structures
+            n_samples: Number of structures to generate
+            cond_scale: Conditioning scale for classifier-free guidance
+            step_lr: Step size for Langevin dynamics
+            return_trajectory: Whether to return full trajectory
+            stream: Whether to return generator
+            
+        Returns:
+            Generated structures (list or generator)
+        """
+        natoms = [n_atoms] * n_samples
+        
+        if stream:
+            return self._decode_generator(natoms, embeddings, cond_scale, step_lr)
+        else:
+            trajectory = list(
+                self._decode_generator(natoms, embeddings, cond_scale, step_lr)
+            )
+            if return_trajectory:
+                return trajectory
+            else:
+                return trajectory[-1]
+
+    @torch.no_grad()
+    def _decode_generator(
+        self,
+        natoms: Union[int, List[int]],
+        embeddings: torch.Tensor,
+        cond_scale: float = 2.0,
+        step_lr: float = 1e-5,
+    ):
+        """
+        Generator that decodes embeddings into structures using diffusion sampling.
+        
+        Args:
+            natoms: List of number of atoms for each sample
+            embeddings: CLIP embeddings [batch_size, text_dim] or [1, text_dim]
+            cond_scale: Conditioning scale for classifier-free guidance
+            step_lr: Step size for Langevin dynamics
+        """
+        # construct a batch
+        if isinstance(natoms, int):
+            natoms = [natoms]
+
+        data_list = [Data(x=torch.zeros(natom, 1), natoms=natom) for natom in natoms]
+        batch = Batch.from_data_list(data_list)
+        batch.to(self.device)
+
+        # set properties
+        batch_size = batch.num_graphs
+        num_nodes = batch.num_nodes
+        batch_idx = batch.batch
+        batch_natoms = batch.natoms
+        mask_lattice_matrix = self.mask_lattice_matrix.to(self.device)
+
+        # sample from pure noise
+        a_T = torch.full((num_nodes,), 0, dtype=torch.long).to(self.device)
+        l_T = torch.randn(batch_size, 3, 3).to(self.device) * mask_lattice_matrix
+        x_T = torch.randn(num_nodes, 3).to(self.device)
+
+        time_start = self.beta_scheduler.timesteps
+        trajectory_container = TrajectoryContainer(total_steps=time_start)
+
+        # Initialize the first step of the trajectory at t=T
+        trajectory_container[time_start] = TrajectoryStep(
+            num_atoms=batch_natoms,
+            atom_types=a_T,
+            frac_coords=x_T % 1.0,
+            lattices=l_T,
+            batch_idx=batch_idx,
+        )
+
+        # Use provided embeddings for conditioning
+        if self.text_guide:
+            # Ensure embeddings are on correct device and have correct shape
+            embeddings = embeddings.to(self.device)
+            if embeddings.shape[0] == 1 and batch_size > 1:
+                # Repeat single embedding for all samples
+                text_embeds = embeddings.repeat(batch_size, 1)
+            elif embeddings.shape[0] == batch_size:
+                # Use embeddings as-is
+                text_embeds = embeddings
+            else:
+                raise ValueError(f"Embeddings shape {embeddings.shape} incompatible with batch_size {batch_size}")
+            
+            # Create null embeddings for classifier-free guidance
+            null_text_embeds = torch.zeros_like(text_embeds).to(self.device)
+        else:
+            text_embeds = None
+            null_text_embeds = None
+
+        # Diffusion sampling loop (identical to original _sample_generator)
+        for t in tqdm(range(time_start, 0, -1)):
+            batched_t = torch.full((batch_size,), t, dtype=torch.long).to(self.device)
+            time_emb = self.time_embed(batched_t)
+
+            a_t = trajectory_container[t].atom_types
+            x_t = trajectory_container[t].frac_coords
+            l_t = trajectory_container[t].lattices
+
+            ### Predictor ###
+            pred_a, pred_l, pred_x = self.model_predictions(
+                time_emb=time_emb,
+                atom_types=a_t,
+                frac_coords=x_t,
+                lattices=l_t,
+                batch_natoms=batch_natoms,
+                batch_idx=batch_idx,
+                cond_scale=cond_scale,
+                text_embeds=text_embeds,
+                null_text_embeds=null_text_embeds,
+            )
+            
+            # update the state for atom types
+            rand_a = (
+                torch.rand((num_nodes, self.max_atoms)).to(self.device)
+                if t > 1
+                else torch.zeros((num_nodes, self.max_atoms)).to(self.device)
+            )
+            pred_x_start_logits = pred_a
+            a_t_minus_1 = self.d3pm.p_logits(
+                pred_x_start_logits=pred_x_start_logits,
+                x_t_atom_types=a_t,
+                t_per_node=batched_t[batch_idx],
+                noise=rand_a,
+            )
+            
+            # update the state for lattice
+            alphas = self.beta_scheduler.alphas[t]
+            alphas_cumprod = self.beta_scheduler.alphas_cumprod[t]
+            sigmas = self.beta_scheduler.sigmas[t]
+            c0 = 1.0 / torch.sqrt(alphas)
+            c1 = (1 - alphas) / torch.sqrt(1 - alphas_cumprod)
+            rand_l = torch.randn_like(l_T) if t > 1 else torch.zeros_like(l_T)
+            rand_l = rand_l * mask_lattice_matrix
+            l_t_minus_1 = c0 * (l_t - c1 * pred_l) + sigmas * rand_l
+            l_t_minus_1 = l_t_minus_1 * mask_lattice_matrix
+            
+            if t == time_start:
+                l_t_minus_1 = l_t_minus_1.clip(-6, 6)
+            
+            # update the state for coords (0 -> 0.5 step)
+            sigma_x = self.sigma_scheduler.sigmas[t]
+            sigma_norm = self.sigma_scheduler.sigmas_norm[t]
+            adjacent_sigma_x = self.sigma_scheduler.sigmas[t - 1]
+            step_size = sigma_x**2 - adjacent_sigma_x**2
+            std_x = torch.sqrt(
+                (adjacent_sigma_x**2 * (sigma_x**2 - adjacent_sigma_x**2))
+                / (sigma_x**2)
+            )
+            rand_x = torch.randn_like(x_T) if t > 1 else torch.zeros_like(x_T)
+            pred_x = pred_x * torch.sqrt(sigma_norm)
+            x_t_minus_05 = x_t - step_size * pred_x + std_x * rand_x
+
+            ### Corrector ###
+            _, _, pred_x = self.model_predictions(
+                time_emb=time_emb,
+                atom_types=a_t_minus_1,
+                frac_coords=x_t_minus_05,
+                lattices=l_t_minus_1,
+                batch_natoms=batch_natoms,
+                batch_idx=batch_idx,
+                cond_scale=cond_scale,
+                text_embeds=text_embeds,
+                null_text_embeds=null_text_embeds,
+            )
+
+            # update the state for coords (0.5 -> 1 step)
+            step_size = step_lr * (sigma_x / self.sigma_scheduler.sigma_begin) ** 2
+            std_x = torch.sqrt(2 * step_size)
+            rand_x = torch.randn_like(x_T) if t > 1 else torch.zeros_like(x_T)
+            pred_x = pred_x * torch.sqrt(sigma_norm)
+            x_t_minus_1 = x_t_minus_05 - step_size * pred_x + std_x * rand_x
+
+            trajectory_step = TrajectoryStep(
+                num_atoms=batch_natoms,
+                atom_types=a_t_minus_1,
+                frac_coords=x_t_minus_1 % 1.0,
+                lattices=l_t_minus_1,
+                batch_idx=batch_idx,
+            )
+            trajectory_container[t - 1] = trajectory_step
+            yield trajectory_container.get_atoms(t=t - 1)
+
+
