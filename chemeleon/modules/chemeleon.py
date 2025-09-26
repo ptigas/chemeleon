@@ -10,10 +10,9 @@ from torch_geometric.data import Data, Batch
 from chemeleon.constants import (
     PATH_CLIP_GENERAL_TEXT,
     PATH_CHEMELEON_GENERAL_TEXT,
-    PATH_CLIP_COMPOSITION,
     PATH_CHEMELEON_COMPOSITION,
-    CHECKPOINT_URLS,
-    CHECKPOINT_DIR
+    PATH_CLIP_COMPOSITION,    
+    CHECKPOINT_URLS
 )
 from chemeleon.utils.download import download_file
 from chemeleon.modules.base_module import BaseModule
@@ -96,17 +95,13 @@ class Chemeleon(BaseModule):
         self.cost_coords = _config["cost_coords"]
 
     @classmethod
-    def load_general_text_model(cls, *args, **kwargs):
-
-        checkpoints_dir = kwargs.get('checkpoints_dir', None)
-
-        if checkpoints_dir is not None:
-            CHECKPOINT_DIR = checkpoints_dir
-            PATH_CLIP_GENERAL_TEXT = os.path.join(CHECKPOINT_DIR, "clip-upy53q4b.ckpt")
-            PATH_CHEMELEON_GENERAL_TEXT = os.path.join(CHECKPOINT_DIR, "chemeleon-7fsg68c3.ckpt")
-
-        path_ckpt_chemeleon = PATH_CHEMELEON_GENERAL_TEXT
-        path_ckpt_clip = PATH_CLIP_GENERAL_TEXT
+    def load_general_text_model(cls, checkpoints_dir=None, *args, **kwargs):    
+        if checkpoints_dir is not None:            
+            path_ckpt_clip  = os.path.join(checkpoints_dir, "clip-upy53q4b.ckpt")
+            path_ckpt_chemeleon = os.path.join(checkpoints_dir, "chemeleon-7fsg68c3.ckpt")
+        else:
+            path_ckpt_chemeleon = PATH_CHEMELEON_GENERAL_TEXT
+            path_ckpt_clip = PATH_CLIP_GENERAL_TEXT
 
         # Check and download checkpoints if not exists
         if not os.path.exists(path_ckpt_chemeleon):
@@ -124,17 +119,13 @@ class Chemeleon(BaseModule):
         )
 
     @classmethod
-    def load_composition_model(cls, *args, **kwargs):
-
-        checkpoints_dir = kwargs.get('checkpoints_dir', None)
-
+    def load_composition_model(cls, checkpoints_dir=None, *args, **kwargs):        
         if checkpoints_dir is not None:
-            CHECKPOINT_DIR = checkpoints_dir            
-            PATH_CLIP_COMPOSITION = os.path.join(CHECKPOINT_DIR, "clip-hlfus38h.ckpt")
-            PATH_CHEMELEON_COMPOSITION = os.path.join(CHECKPOINT_DIR, "chemeleon-fksq6cgp.ckpt")
-
-        path_ckpt_chemeleon = PATH_CHEMELEON_COMPOSITION
-        path_ckpt_clip = PATH_CLIP_COMPOSITION
+            path_ckpt_clip = os.path.join(checkpoints_dir, "clip-hlfus38h.ckpt")
+            path_ckpt_chemeleon = os.path.join(checkpoints_dir, "chemeleon-fksq6cgp.ckpt")
+        else:
+            path_ckpt_chemeleon = PATH_CHEMELEON_COMPOSITION
+            path_ckpt_clip = PATH_CLIP_COMPOSITION
 
         # Check and download checkpoints if not exists
         if not os.path.exists(path_ckpt_chemeleon):
