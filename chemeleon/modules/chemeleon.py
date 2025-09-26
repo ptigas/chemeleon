@@ -10,9 +10,9 @@ from torch_geometric.data import Data, Batch
 from chemeleon.constants import (
     PATH_CLIP_GENERAL_TEXT,
     PATH_CHEMELEON_GENERAL_TEXT,
+    PATH_CLIP_COMPOSITION,
     PATH_CHEMELEON_COMPOSITION,
-    PATH_CLIP_COMPOSITION,    
-    CHECKPOINT_URLS
+    CHECKPOINT_URLS,
 )
 from chemeleon.utils.download import download_file
 from chemeleon.modules.base_module import BaseModule
@@ -95,13 +95,9 @@ class Chemeleon(BaseModule):
         self.cost_coords = _config["cost_coords"]
 
     @classmethod
-    def load_general_text_model(cls, checkpoints_dir=None, *args, **kwargs):    
-        if checkpoints_dir is not None:            
-            path_ckpt_clip  = os.path.join(checkpoints_dir, "clip-upy53q4b.ckpt")
-            path_ckpt_chemeleon = os.path.join(checkpoints_dir, "chemeleon-7fsg68c3.ckpt")
-        else:
-            path_ckpt_chemeleon = PATH_CHEMELEON_GENERAL_TEXT
-            path_ckpt_clip = PATH_CLIP_GENERAL_TEXT
+    def load_general_text_model(cls, *args, **kwargs):
+        path_ckpt_chemeleon = PATH_CHEMELEON_GENERAL_TEXT
+        path_ckpt_clip = PATH_CLIP_GENERAL_TEXT
 
         # Check and download checkpoints if not exists
         if not os.path.exists(path_ckpt_chemeleon):
@@ -119,13 +115,9 @@ class Chemeleon(BaseModule):
         )
 
     @classmethod
-    def load_composition_model(cls, checkpoints_dir=None, *args, **kwargs):        
-        if checkpoints_dir is not None:
-            path_ckpt_clip = os.path.join(checkpoints_dir, "clip-hlfus38h.ckpt")
-            path_ckpt_chemeleon = os.path.join(checkpoints_dir, "chemeleon-fksq6cgp.ckpt")
-        else:
-            path_ckpt_chemeleon = PATH_CHEMELEON_COMPOSITION
-            path_ckpt_clip = PATH_CLIP_COMPOSITION
+    def load_composition_model(cls, *args, **kwargs):
+        path_ckpt_chemeleon = PATH_CHEMELEON_COMPOSITION
+        path_ckpt_clip = PATH_CLIP_COMPOSITION
 
         # Check and download checkpoints if not exists
         if not os.path.exists(path_ckpt_chemeleon):
@@ -511,7 +503,8 @@ class Chemeleon(BaseModule):
         Decode CLIP embeddings into crystal structures using the diffusion model.
         
         Args:
-            embeddings: CLIP embeddings tensor [batch_size, text_dim] or [1, text_dim]
+            embeddings: CLIP embeddings tensor [batch_size, embed_dim] or [1, embed_dim]
+                       Can be raw CLIP embeddings (any dimension) or pre-processed embeddings
             n_atoms: Number of atoms in generated structures
             n_samples: Number of structures to generate
             cond_scale: Conditioning scale for classifier-free guidance
@@ -548,7 +541,8 @@ class Chemeleon(BaseModule):
         
         Args:
             natoms: List of number of atoms for each sample
-            embeddings: CLIP embeddings [batch_size, text_dim] or [1, text_dim]
+            embeddings: CLIP embeddings [batch_size, embed_dim] or [1, embed_dim]
+                       Can be raw CLIP embeddings (any dimension) or pre-processed embeddings
             cond_scale: Conditioning scale for classifier-free guidance
             step_lr: Step size for Langevin dynamics
         """
@@ -590,12 +584,22 @@ class Chemeleon(BaseModule):
             embeddings = embeddings.to(self.device)
             if embeddings.shape[0] == 1 and batch_size > 1:
                 # Repeat single embedding for all samples
-                text_embeds = embeddings.repeat(batch_size, 1)
+                raw_embeds = embeddings.repeat(batch_size, 1)
             elif embeddings.shape[0] == batch_size:
                 # Use embeddings as-is
-                text_embeds = embeddings
+                raw_embeds = embeddings
             else:
                 raise ValueError(f"Embeddings shape {embeddings.shape} incompatible with batch_size {batch_size}")
+            
+            # Check if embeddings need to be processed through text encoder
+            expected_dim = self.text_encoder.text_dim  # Final expected dimension (usually 512)
+            if raw_embeds.shape[1] != expected_dim:
+                # Process raw embeddings through text encoder's MLP to get correct dimension
+                # This handles CLIP embeddings that haven't been processed yet
+                text_embeds = self.text_encoder.text_emb(raw_embeds)
+            else:
+                # Embeddings are already in the correct dimension
+                text_embeds = raw_embeds
             
             # Create null embeddings for classifier-free guidance
             null_text_embeds = torch.zeros_like(text_embeds).to(self.device)
